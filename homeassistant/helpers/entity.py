@@ -1226,6 +1226,18 @@ class Entity(
             self._context = None
             self._context_set = None
 
+        try:
+            old_state = self.hass.states._states_data[self.entity_id]
+        except KeyError:
+            try:
+                stored = self._async_get_restored_data().state
+                attr["Real last_changed"] = stored_last_changed = stored.last_changed
+                attr["Real last_state"] = stored.state
+            except AttributeError:
+                stored_last_changed = None
+        else:
+            stored_last_changed = None
+        
         # Intentionally called with positional args for performance reasons
         self.hass.states.async_set_internal(
             self.entity_id,
@@ -1234,7 +1246,7 @@ class Entity(
             self.force_update,
             self._context,
             self._state_info,
-            time_now,
+            time_now if stored_last_changed is None or state == STATE_UNKNOWN else stored_last_changed.timestamp(),
         )
 
     def schedule_update_ha_state(self, force_refresh: bool = False) -> None:

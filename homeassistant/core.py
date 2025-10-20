@@ -72,6 +72,7 @@ from .const import (
     MAX_EXPECTED_ENTITY_IDS,
     MAX_LENGTH_EVENT_EVENT_TYPE,
     MAX_LENGTH_STATE_STATE,
+    STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     __version__,
 )
@@ -2318,6 +2319,7 @@ class StateMachine:
         # python 3.11+ has near zero overhead for
         # try when it does not raise an exception.
         old_state: State | None
+        real_last_changed = None
         try:
             old_state = self._states_data[entity_id]
         except KeyError:
@@ -2326,6 +2328,9 @@ class StateMachine:
             same_attr = False
             last_changed = None
         else:
+            if new_state == STATE_UNAVAILABLE:
+                attributes["Real last_changed"] = old_state.attributes.get("Real last_changed", old_state.last_changed)
+                attributes["Real last_state"] = old_state.attributes.get("Real last_state", old_state.state)
             same_state = old_state.state == new_state and not force_update
             same_attr = old_state.attributes == attributes
             last_changed = old_state.last_changed if same_state else None
@@ -2408,6 +2413,34 @@ class StateMachine:
             context=context,
             time_fired=timestamp,
         )
+        
+        # If we are coming back from unknown/unavailable, and the old real state is identical to the new real state, we post a second identical state but with the older last_changed
+        # We must also post a state with a last_changed as of now (which is done above) because the history charts will be all messed up if we don't
+        if new_state != STATE_UNKNOWN and new_state != STATE_UNAVAILABLE and old_state and old_state.attributes.get("Real last_state") == new_state:
+          state = State(
+              entity_id,
+              new_state,
+              attributes,
+              old_state.attributes["Real last_changed"],
+              now,
+              now,
+              context,
+              old_state is None,
+              state_info,
+              timestamp,
+          )
+          self._states[entity_id] = state
+          state_changed_data: EventStateChangedData = {
+              "entity_id": entity_id,
+              "old_state": old_state,
+              "new_state": state,
+          }
+          self._bus.async_fire_internal(
+              EVENT_STATE_CHANGED,
+              state_changed_data,
+              context=context,
+              time_fired=timestamp,
+         )
 
 
 class SupportsResponse(enum.StrEnum):
