@@ -223,6 +223,7 @@ def _ws_get_statistics_during_period(
     period: Literal["5minute", "day", "hour", "week", "month", "year"],
     units: dict[str, str],
     types: set[Literal["change", "last_reset", "max", "mean", "min", "state", "sum"]],
+    day_start_hour: int,
 ) -> bytes:
     """Fetch statistics and convert them to json in the executor."""
     result = statistics_during_period(
@@ -233,6 +234,7 @@ def _ws_get_statistics_during_period(
         period,
         units,
         types,
+        day_start_hour,
     )
     include_last_reset = "last_reset" in types
     for statistic_rows in result.values():
@@ -279,6 +281,7 @@ async def ws_handle_get_statistics_during_period(
             msg.get("period"),
             msg.get("units"),
             types,
+            msg.get("day_start_hour", 0),
         )
     )
 
@@ -291,6 +294,9 @@ async def ws_handle_get_statistics_during_period(
         probatio.Required("statistic_ids"): probatio.All([str], probatio.Length(min=1)),
         probatio.Required("period"): probatio.Any(
             "5minute", "hour", "day", "week", "month", "year"
+        ),
+        probatio.Optional("day_start_hour", default=0): probatio.All(
+            probatio.Coerce(int), probatio.Range(min=0, max=23)
         ),
         probatio.Optional("units"): UNIT_SCHEMA,
         probatio.Optional("types"): probatio.All(

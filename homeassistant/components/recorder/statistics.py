@@ -1250,7 +1250,51 @@ def _reduce_statistics(
     return result
 
 
-def reduce_day_ts_factory() -> tuple[
+def _local_day_start(
+    timestamp: datetime,
+    day_start_hour: int,
+) -> datetime:
+    """Return the local day boundary timestamp belongs to.
+
+    For non-zero day_start_hour, times between 00:00 and day_start_hour-1:59
+    belong to the previous day period.
+    """
+    start = timestamp.replace(
+        hour=day_start_hour, minute=0, second=0, microsecond=0
+    )
+    if timestamp < start:
+        start -= timedelta(days=1)
+    return start
+
+
+def _local_week_start(
+    timestamp: datetime,
+    day_start_hour: int,
+) -> datetime:
+    """Return the local week boundary timestamp belongs to."""
+    day_start = _local_day_start(timestamp, day_start_hour)
+    return day_start - timedelta(days=day_start.weekday())
+
+
+def _local_month_start(
+    timestamp: datetime,
+    day_start_hour: int,
+) -> datetime:
+    """Return the local month boundary timestamp belongs to."""
+    day_start = _local_day_start(timestamp, day_start_hour)
+    return day_start.replace(day=1)
+
+
+def _local_year_start(
+    timestamp: datetime,
+    day_start_hour: int,
+) -> datetime:
+    """Return the local year boundary timestamp belongs to."""
+    day_start = _local_day_start(timestamp, day_start_hour)
+    return day_start.replace(month=1, day=1)
+
+
+def reduce_day_ts_factory(day_start_hour: int = 0) -> tuple[
     Callable[[float, float], bool],
     Callable[[float], tuple[float, float]],
 ]:
@@ -1273,9 +1317,7 @@ def reduce_day_ts_factory() -> tuple[
 
     def _day_start_end_ts(time: float) -> tuple[float, float]:
         """Return the start and end of the period (day) time is within."""
-        start_local = _local_from_timestamp(time).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        start_local = _local_day_start(_local_from_timestamp(time), day_start_hour)
         return (
             start_local.timestamp(),
             (start_local + timedelta(days=1)).timestamp(),
@@ -1291,15 +1333,16 @@ def _reduce_statistics_per_day(
     stats: dict[str, list[StatisticsRow]],
     types: set[Literal["last_reset", "max", "mean", "min", "state", "sum"]],
     metadata: dict[str, tuple[int, StatisticMetaData]],
+    day_start_hour: int = 0,
 ) -> dict[str, list[StatisticsRow]]:
     """Reduce hourly statistics to daily statistics."""
-    _same_day_ts, _day_start_end_ts = reduce_day_ts_factory()
+    _same_day_ts, _day_start_end_ts = reduce_day_ts_factory(day_start_hour)
     return _reduce_statistics(
         stats, _same_day_ts, _day_start_end_ts, timedelta(days=1), types, metadata
     )
 
 
-def reduce_week_ts_factory() -> tuple[
+def reduce_week_ts_factory(day_start_hour: int = 0) -> tuple[
     Callable[[float, float], bool],
     Callable[[float], tuple[float, float]],
 ]:
@@ -1322,10 +1365,7 @@ def reduce_week_ts_factory() -> tuple[
 
     def _week_start_end_ts(time: float) -> tuple[float, float]:
         """Return the start and end of the period (week) time is within."""
-        time_local = _local_from_timestamp(time)
-        start_local = time_local.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) - timedelta(days=time_local.weekday())
+        start_local = _local_week_start(_local_from_timestamp(time), day_start_hour)
         return (
             start_local.timestamp(),
             (start_local + timedelta(days=7)).timestamp(),
@@ -1341,23 +1381,24 @@ def _reduce_statistics_per_week(
     stats: dict[str, list[StatisticsRow]],
     types: set[Literal["last_reset", "max", "mean", "min", "state", "sum"]],
     metadata: dict[str, tuple[int, StatisticMetaData]],
+    day_start_hour: int = 0,
 ) -> dict[str, list[StatisticsRow]]:
     """Reduce hourly statistics to weekly statistics."""
-    _same_week_ts, _week_start_end_ts = reduce_week_ts_factory()
+    _same_week_ts, _week_start_end_ts = reduce_week_ts_factory(day_start_hour)
     return _reduce_statistics(
         stats, _same_week_ts, _week_start_end_ts, timedelta(days=7), types, metadata
     )
 
 
-def _find_month_end_time(timestamp: datetime) -> datetime:
+def _find_month_end_time(timestamp: datetime, day_start_hour: int = 0) -> datetime:
     """Return the end of the month (midnight at the first day of the next month)."""
     # We add 4 days to the end to make sure we are in the next month
     return (timestamp.replace(day=28) + timedelta(days=4)).replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0
+        day=1, hour=day_start_hour, minute=0, second=0, microsecond=0
     )
 
 
-def reduce_month_ts_factory() -> tuple[
+def reduce_month_ts_factory(day_start_hour: int = 0) -> tuple[
     Callable[[float, float], bool],
     Callable[[float], tuple[float, float]],
 ]:
@@ -1380,10 +1421,8 @@ def reduce_month_ts_factory() -> tuple[
 
     def _month_start_end_ts(time: float) -> tuple[float, float]:
         """Return the start and end of the period (month) time is within."""
-        start_local = _local_from_timestamp(time).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-        end_local = _find_month_end_time(start_local)
+        start_local = _local_month_start(_local_from_timestamp(time), day_start_hour)
+        end_local = _find_month_end_time(start_local, day_start_hour)
         return (start_local.timestamp(), end_local.timestamp())
 
     # We create _month_start_end_ts_cached in the closure in case the timezone changes
@@ -1396,15 +1435,16 @@ def _reduce_statistics_per_month(
     stats: dict[str, list[StatisticsRow]],
     types: set[Literal["last_reset", "max", "mean", "min", "state", "sum"]],
     metadata: dict[str, tuple[int, StatisticMetaData]],
+    day_start_hour: int = 0,
 ) -> dict[str, list[StatisticsRow]]:
     """Reduce hourly statistics to monthly statistics."""
-    _same_month_ts, _month_start_end_ts = reduce_month_ts_factory()
+    _same_month_ts, _month_start_end_ts = reduce_month_ts_factory(day_start_hour)
     return _reduce_statistics(
         stats, _same_month_ts, _month_start_end_ts, timedelta(days=31), types, metadata
     )
 
 
-def reduce_year_ts_factory() -> tuple[
+def reduce_year_ts_factory(day_start_hour: int = 0) -> tuple[
     Callable[[float, float], bool],
     Callable[[float], tuple[float, float]],
 ]:
@@ -1427,9 +1467,7 @@ def reduce_year_ts_factory() -> tuple[
 
     def _year_start_end_ts(time: float) -> tuple[float, float]:
         """Return the start and end of the period (year) time is within."""
-        start_local = _local_from_timestamp(time).replace(
-            month=1, day=1, hour=0, minute=0, second=0, microsecond=0
-        )
+        start_local = _local_year_start(_local_from_timestamp(time), day_start_hour)
         return (
             start_local.timestamp(),
             (start_local.replace(year=start_local.year + 1)).timestamp(),
@@ -1445,9 +1483,10 @@ def _reduce_statistics_per_year(
     stats: dict[str, list[StatisticsRow]],
     types: set[Literal["last_reset", "max", "mean", "min", "state", "sum"]],
     metadata: dict[str, tuple[int, StatisticMetaData]],
+    day_start_hour: int = 0,
 ) -> dict[str, list[StatisticsRow]]:
     """Reduce hourly statistics to yearly statistics."""
-    _same_year_ts, _year_start_end_ts = reduce_year_ts_factory()
+    _same_year_ts, _year_start_end_ts = reduce_year_ts_factory(day_start_hour)
     return _reduce_statistics(
         stats, _same_year_ts, _year_start_end_ts, timedelta(days=366), types, metadata
     )
@@ -2096,6 +2135,7 @@ def _statistics_during_period_with_session(
     period: Literal["5minute", "day", "hour", "week", "month", "year"],
     units: dict[str, str] | None,
     _types: set[Literal["change", "last_reset", "max", "mean", "min", "state", "sum"]],
+    day_start_hour: int = 0,
 ) -> dict[str, list[StatisticsRow]]:
     """Return statistic data points during UTC period start_time - end_time.
 
@@ -2126,45 +2166,35 @@ def _statistics_during_period_with_session(
 
     # Align start_time and end_time with the period
     if period == "day":
-        start_time = dt_util.as_local(start_time).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        start_time = _local_day_start(dt_util.as_local(start_time), day_start_hour)
         start_time = start_time.replace()
         if end_time is not None:
-            end_local = dt_util.as_local(end_time)
-            end_time = end_local.replace(
-                hour=0, minute=0, second=0, microsecond=0
+            end_time = _local_day_start(
+                dt_util.as_local(end_time), day_start_hour
             ) + timedelta(days=1)
     elif period == "week":
-        start_local = dt_util.as_local(start_time)
-        start_time = start_local.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) - timedelta(days=start_local.weekday())
+        start_time = _local_week_start(dt_util.as_local(start_time), day_start_hour)
         if end_time is not None:
-            end_local = dt_util.as_local(end_time)
-            end_time = (
-                end_local.replace(hour=0, minute=0, second=0, microsecond=0)
-                - timedelta(days=end_local.weekday())
-                + timedelta(days=7)
-            )
+            end_time = _local_week_start(
+                dt_util.as_local(end_time), day_start_hour
+            ) + timedelta(days=7)
     elif period == "month":
-        start_time = dt_util.as_local(start_time).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
+        start_time = _local_month_start(dt_util.as_local(start_time), day_start_hour)
         if end_time is not None:
-            end_time = _find_month_end_time(dt_util.as_local(end_time))
+            end_time = _find_month_end_time(
+                _local_month_start(dt_util.as_local(end_time), day_start_hour),
+                day_start_hour,
+            )
 
     elif period == "year":
-        start_time = dt_util.as_local(start_time).replace(
-            month=1, day=1, hour=0, minute=0, second=0, microsecond=0
-        )
+        start_time = _local_year_start(dt_util.as_local(start_time), day_start_hour)
         if end_time is not None:
-            end_local = dt_util.as_local(end_time)
+            end_local = _local_year_start(dt_util.as_local(end_time), day_start_hour)
             end_time = end_local.replace(
                 year=end_local.year + 1,
                 month=1,
                 day=1,
-                hour=0,
+                hour=day_start_hour,
                 minute=0,
                 second=0,
                 microsecond=0,
@@ -2195,16 +2225,18 @@ def _statistics_during_period_with_session(
     )
 
     if period == "day":
-        result = _reduce_statistics_per_day(result, types, metadata)
+        result = _reduce_statistics_per_day(result, types, metadata, day_start_hour)
 
     if period == "week":
-        result = _reduce_statistics_per_week(result, types, metadata)
+        result = _reduce_statistics_per_week(result, types, metadata, day_start_hour)
 
     if period == "month":
-        result = _reduce_statistics_per_month(result, types, metadata)
+        result = _reduce_statistics_per_month(
+            result, types, metadata, day_start_hour
+        )
 
     if period == "year":
-        result = _reduce_statistics_per_year(result, types, metadata)
+        result = _reduce_statistics_per_year(result, types, metadata, day_start_hour)
 
     if "change" in _types:
         _augment_result_with_change(
@@ -2229,6 +2261,7 @@ def statistics_during_period(
     period: Literal["5minute", "day", "hour", "week", "month", "year"],
     units: dict[str, str] | None,
     types: set[Literal["change", "last_reset", "max", "mean", "min", "state", "sum"]],
+    day_start_hour: int = 0,
 ) -> dict[str, list[StatisticsRow]]:
     """Return statistic data points during UTC period start_time - end_time.
 
@@ -2245,6 +2278,7 @@ def statistics_during_period(
             period,
             units,
             types,
+            day_start_hour,
         )
 
 

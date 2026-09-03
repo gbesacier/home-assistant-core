@@ -243,6 +243,9 @@ async def ws_solar_forecast(
         probatio.Required("energy_statistic_ids"): [str],
         probatio.Required("co2_statistic_id"): str,
         probatio.Required("period"): probatio.Any("5minute", "hour", "day", "month"),
+        probatio.Optional("day_start_hour", default=0): probatio.All(
+            probatio.Coerce(int), probatio.Range(min=0, max=23)
+        ),
     }
 )
 @websocket_api.async_response
@@ -280,6 +283,7 @@ async def ws_get_fossil_energy_consumption(
         "hour",
         {"energy": UnitOfEnergy.KILO_WATT_HOUR},
         {"mean", "change"},
+        msg["day_start_hour"],
     )
 
     def _combine_change_statistics(
@@ -357,7 +361,9 @@ async def ws_get_fossil_energy_consumption(
         ]
 
     elif msg["period"] == "day":
-        _same_day_ts, _day_start_end_ts = recorder.statistics.reduce_day_ts_factory()
+        _same_day_ts, _day_start_end_ts = recorder.statistics.reduce_day_ts_factory(
+            msg["day_start_hour"]
+        )
         reduced_fossil_energy = _reduce_deltas(
             fossil_energy,
             _same_day_ts,
@@ -368,7 +374,7 @@ async def ws_get_fossil_energy_consumption(
         (
             _same_month_ts,
             _month_start_end_ts,
-        ) = recorder.statistics.reduce_month_ts_factory()
+        ) = recorder.statistics.reduce_month_ts_factory(msg["day_start_hour"])
         reduced_fossil_energy = _reduce_deltas(
             fossil_energy,
             _same_month_ts,
