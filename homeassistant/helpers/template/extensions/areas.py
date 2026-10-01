@@ -49,6 +49,14 @@ class AreaExtension(BaseTemplateExtension):
                     limited_ok=False,
                 ),
                 TemplateFunction(
+                    "area_icon",
+                    self.area_icon,
+                    as_global=True,
+                    as_filter=True,
+                    requires_hass=True,
+                    limited_ok=False,
+                ),
+                TemplateFunction(
                     "area_entities",
                     self.area_entities,
                     as_global=True,
@@ -78,6 +86,14 @@ class AreaExtension(BaseTemplateExtension):
         area = area_reg.async_get_area(valid_area_id)
         assert area
         return area.name
+
+    def _get_area_icon(
+        self, area_reg: ar.AreaRegistry, valid_area_id: str
+    ) -> str | None:
+        """Get area icon from valid area ID."""
+        area = area_reg.async_get_area(valid_area_id)
+        assert area
+        return area.icon
 
     def area_name(self, lookup_value: str) -> str | None:
         """Get the area name from an area id, device id, or entity id."""
@@ -113,6 +129,43 @@ class AreaExtension(BaseTemplateExtension):
             area_id := dr.async_get_effective_area_id(self.hass, device)
         ):
             return self._get_area_name(area_reg, area_id)
+
+        return None
+
+    def area_icon(self, lookup_value: str) -> str | None:
+        """Get the area icon from an area id, device id, or entity id."""
+        area_reg = ar.async_get(self.hass)
+        if area := area_reg.async_get_area(lookup_value):
+            return area.icon
+
+        dev_reg = dr.async_get(self.hass)
+        ent_reg = er.async_get(self.hass)
+        # Import here, not at top-level to avoid circular import
+        from homeassistant.helpers import config_validation as cv  # noqa: PLC0415
+
+        try:
+            cv.entity_id(lookup_value)
+        except vol.Invalid:
+            pass
+        else:
+            if entity := ent_reg.async_get(lookup_value):
+                # If entity has an area ID, get the area icon for that
+                if entity.area_id:
+                    return self._get_area_icon(area_reg, entity.area_id)
+                # If entity has a device ID and the device
+                # exists with an area ID, get the area icon
+                # for that
+                if (
+                    entity.device_id
+                    and (device := dev_reg.async_get(entity.device_id))
+                    and (area_id := dr.async_get_effective_area_id(self.hass, device))
+                ):
+                    return self._get_area_icon(area_reg, area_id)
+
+        if (device := dev_reg.async_get(lookup_value)) and (
+            area_id := dr.async_get_effective_area_id(self.hass, device)
+        ):
+            return self._get_area_icon(area_reg, area_id)
 
         return None
 
