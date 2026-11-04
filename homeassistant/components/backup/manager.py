@@ -53,6 +53,7 @@ from .const import (
     DATA_MANAGER,
     DOMAIN,
     EXCLUDE_DATABASE_FROM_BACKUP,
+    EXCLUDE_FROM_AUTOMATIC_BACKUP,
     EXCLUDE_FROM_BACKUP,
     LOGGER,
     SECURETAR_CREATE_VERSION,
@@ -1911,6 +1912,8 @@ class CoreBackupReaderWriter(BackupReaderWriter):
             ) from err
 
         excludes = EXCLUDE_FROM_BACKUP
+        if backup_data["extra"].get("with_automatic_settings"):
+            excludes = excludes + EXCLUDE_FROM_AUTOMATIC_BACKUP
         if not database_included:
             excludes = excludes + EXCLUDE_DATABASE_FROM_BACKUP
 

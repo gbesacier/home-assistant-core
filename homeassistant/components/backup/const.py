@@ -27,6 +27,11 @@ EXCLUDE_FROM_BACKUP = [
     ".cache/*",
 ]
 
+EXCLUDE_FROM_AUTOMATIC_BACKUP = [
+    ".venv/*",
+    "**/*.onnx",
+]
+
 EXCLUDE_DATABASE_FROM_BACKUP = [
     "home-assistant_v2.db",
     "home-assistant_v2.db-wal",

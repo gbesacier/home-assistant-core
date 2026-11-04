@@ -420,6 +420,54 @@ async def test_create_backup_wrong_parameters(
     assert result["error"]["message"] == expected_error
 
 
+@pytest.mark.parametrize("automatic", [True, False])
+async def test_automatic_backup_excludes_large_files(
+    hass: HomeAssistant,
+    tmp_path: Path,
+    automatic: bool,
+) -> None:
+    """Test large development and model files are excluded only automatically."""
+    await setup_backup_integration(hass)
+
+    config_path = Path(hass.config.path())
+    automatic_only_paths = [
+        config_path / ".venv" / "lib" / "python" / "module.py",
+        config_path / "models" / "weights.onnx",
+    ]
+    always_excluded_path = config_path / ".cache" / "model.cache"
+    for path in [*automatic_only_paths, always_excluded_path]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("data")
+
+    backup_path = tmp_path / "backup.tar"
+    manager = hass.data[DATA_MANAGER]
+    manager._reader_writer._mkdir_and_generate_backup_contents(
+        {
+            "slug": "test",
+            "extra": {"with_automatic_settings": automatic},
+        },
+        database_included=True,
+        password=None,
+        tar_file_path=backup_path,
+    )
+
+    with tarfile.open(backup_path) as outer_tar:
+        core_tar_io = outer_tar.extractfile("homeassistant.tar.gz")
+        assert core_tar_io is not None
+        with SecureTarFile(fileobj=core_tar_io, gzip=True, password=None) as core_tar:
+            names = set(core_tar.getnames())
+
+    excluded_paths = {
+        f"data/{path.relative_to(config_path)}" for path in automatic_only_paths
+    }
+    cache_path = f"data/{always_excluded_path.relative_to(config_path)}"
+    assert cache_path not in names
+    if automatic:
+        assert excluded_paths.isdisjoint(names)
+    else:
+        assert excluded_paths <= names
+
+
 @pytest.mark.usefixtures("mock_ha_version")
 @pytest.mark.parametrize(
     (
